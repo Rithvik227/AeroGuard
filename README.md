@@ -31,10 +31,10 @@ This hardware and software integration directly addresses UN Sustainable Develop
 
  Software Dependencies
 To compile this firmware in the Arduino IDE or PlatformIO, the following dependencies must be installed:
-** `Adafruit_BME680`**
-** `Adafruit_Sensor`**
-** `Adafruit_SSD1306`**
-** `Adafruit_GFX`**
+`Adafruit_BME680`
+`Adafruit_Sensor`
+`Adafruit_SSD1306`
+`Adafruit_GFX`
 
 Core Logic & Polling Algorithm
 Upon initialization, the firmware runs a boot sequence to establish a clean-air VOC baseline. 
