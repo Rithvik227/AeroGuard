@@ -45,7 +45,7 @@ or construction fumes)—the ESP32 asserts the haptic motor pin HIGH.
 
 Instructions
 1. Install the ESP32 Board Support Package within the Arduino IDE.
-2. Select the [Insert Exact Board Name] target environment.
+2. Select the  target environment.
 3. Interface the ESP32-C3 to the host machine via USB-C.
 4. Verify the I2C pin mappings align with the active hardware revision.
 5. Compile and flash `AeroGuard_Main.ino` to the MCU.
