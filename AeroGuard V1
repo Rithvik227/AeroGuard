@@ -1,0 +1,135 @@
+/* * Project: AeroGuard V1 Firmware
+ * Author: Rithvik Godishala/Team AeroGuard
+ * Date: 04/18/2026
+ * Description: Environmental safety wearable utilizing the Bosch BSEC algorithm 
+ * to detect hazardous VOC levels and trigger haptic feedback.
+ */
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <bsec2.h>
+
+// Pin definitions
+
+// I2C Bus Pins
+const int I2C_SDA = 6;
+const int I2C_SCL = 7;
+
+// Haptic motor trigger pin
+const int MOTOR_PIN = 5;
+
+// OLED Display config
+const int SCREEN_WIDTH = 128;
+const int SCREEN_HEIGHT = 64;
+const int OLED_RESET = -1; //Shares reset with ESP32 board
+
+// Creates the physical objects in the software
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Bsec2 bme; 
+
+// Global variables to hold sensor data
+float currentTemp = 0.0;
+float currentHum = 0.0;
+float currentIAQ = 0.0;
+uint8_t currentAccuracy = 0; 
+
+// Calls custom callback to get the BSEC data
+void newDataCallback(const bme68xData data, const bsecOutputs outputs, Bsec2 bsec) {
+  if (!outputs.nOutputs) {
+    return;
+  }
+
+  for (uint8_t i = 0; i < outputs.nOutputs; i++) {
+    const bsecData output  = outputs.output[i];
+
+    switch (output.sensor_id) {
+      case BSEC_OUTPUT_IAQ:
+        currentIAQ = output.signal;
+        currentAccuracy = output.accuracy;
+        break;
+
+      case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE:
+        currentTemp = output.signal;
+        break;
+        
+      case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY:
+        currentHum = output.signal;
+        break;
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+  Serial.println("AeroGuard V1 Test - Booting Sequence Initiated");
+
+  // Initalizing Haptic Motor Pins
+  pinMode(MOTOR_PIN, OUTPUT);
+  digitalWrite(MOTOR_PIN, LOW);
+
+  // Initializing I2C bus
+  Wire.begin(I2C_SDA, I2C_SCL);
+
+  // The following if statement was written with the assistance of Gemini 3.1 Pro, this if statement stops the program code and lets the programmers know exactly where the system broke and doesn't risk damaging other components.
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("System Stopped: OLED Display failed to allocate");
+    for(;;);
+  }
+
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // The following if statement was written with the assistance of Gemini 3.1 Pro, this if statement stops the program code and lets the programmers know exactly where the system broke and doesn't risk damaging other components.
+  if (!bme.begin(BME68X_I2C_ADDR_HIGH, Wire)) { 
+    Serial.println("System stopped: Could not find BME680 via BSEC");
+    for(;;);
+  }
+
+  // Set up the BME680 sensor's internal algorithm subscriptions
+  bsecSensor sensorList[] = {
+    BSEC_OUTPUT_IAQ,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY
+  };
+  
+  bme.updateSubscription(sensorList, 3, BSEC_SAMPLE_RATE_LP);
+  bme.attachCallback(newDataCallback);
+}
+
+void loop() {
+  if (!bme.run()) {
+    return; //If the BME680 fails to perform a reading, the program will skip the rest of the loop and try again
+  }
+
+  if (currentIAQ >= 150.0) { //if the IAQ score is greater than or equal to 150, then the motor will vibrate to alert the user
+    digitalWrite(MOTOR_PIN, HIGH);
+  } else {
+    digitalWrite(MOTOR_PIN, LOW); //if the IAQ score is less than 150, the motor will not vibrate because conditions are not critical.
+  }
+
+  // configures OLED display to show BME readings
+  display.clearDisplay();
+
+  display.setCursor(0,0);
+  display.print("Temp: ");
+  display.print(currentTemp);
+  display.print(" C");
+
+  display.setCursor(0,16);
+  display.print("Hum: ");
+  display.print(currentHum);
+  display.print(" %");
+
+  display.setCursor(0,32);
+  display.print("Air Qlty: ");
+  display.print(currentIAQ);
+
+  display.setCursor(0,48);
+  display.print("Acc: ");
+  display.print(currentAccuracy);
+  display.print("/3");
+
+  display.display();
+}
