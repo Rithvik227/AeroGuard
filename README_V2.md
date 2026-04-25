@@ -1,1 +1,55 @@
 
+# Project AeroGuard: Firmware & System Logic
+
+**SkillsUSA Engineering Technology-Design (2024-2026)**
+**Institution:** William Mason High School  
+**Lead Electronics & Firmware:** Rithvik Godishala  
+**Mechanical Design:** Abinav Valluri  
+**Project Management:** Sushil Kumaresan  
+
+---
+
+## System Overview
+This repository contains the C++ firmware for Project AeroGuard, a low-cost (<$50) wearable air quality monitoring system engineered for high-risk industrial environments. The system utilizes an ESP32-C3 microcontroller to actively sample Volatile Organic Compounds (VOCs) and triggers a haptic feedback mechanism to alert users in high-noise environments where traditional audible alarms are ineffective.
+
+This hardware and software integration directly addresses **UN Sustainable Development Goals 3** (Good Health and Well-being) and **11** (Sustainable Cities and Communities).
+
+## Hardware Architecture
+* **Microcontroller:** ESP32-C3 SuperMini (Selected for ultra-low power consumption and minimal Z-height footprint)
+* **Sensor Array:** BME680 (Environmental telemetry including Temperature, Humidity, Pressure, and VOC Gas Resistance)
+* **Display:** 0.96" I2C OLED Display
+* **Alert Mechanism:** 3V Haptic Vibration Motor (Driven via NPN Transistor)
+* **Power Management:** 3.7V LiPo Battery integrated with a TP4056 Charging Module
+* **User Interface:** Tactile push-button for hardware muting/wake
+
+## Pin Configuration
+Based on the finalized Rev 2.0 hardware schematic, the ESP32-C3 pin mapping is as follows:
+
+| Component | ESP32-C3 Pin | Interface / Function |
+| :--- | :--- | :--- |
+| BME680 & OLED SDA | GPIO 6 | I2C Data |
+| BME680 & OLED SCL | GPIO 7 | I2C Clock |
+| Haptic Motor | GPIO 5 | Digital Out (Alert Trigger) |
+| Mute/Wake Button | GPIO 4 | Digital In (Internal Pullup) |
+| Battery Level (ADC) | GPIO 3 | Analog In (Voltage Divider) |
+
+## Software Dependencies
+To compile this firmware in the Arduino IDE or PlatformIO, the following dependencies must be installed via the Library Manager:
+* `bsec2` (Bosch Sensortec Environmental Cluster algorithm)
+* `Adafruit_GFX`
+* `Adafruit_SSD1306`
+* `Wire` & `EEPROM` (Standard Arduino libraries)
+
+## Core Logic & Polling Algorithm
+Upon initialization, the firmware runs a boot sequence and utilizes the Bosch BSEC algorithm to establish a clean-air VOC baseline. The main execution `loop()` polls the BME680 sensor continuously while maintaining non-blocking delays using `millis()`.
+
+* **Hazard Detection:** If the environmental Index of Air Quality (IAQ) exceeds a threshold of **200**—indicating a sudden concentration of VOCs (e.g., industrial solvents, dry-erase marker solvent, or construction fumes)—the ESP32 asserts the haptic motor pin HIGH and maximizes OLED contrast to flash a visual warning.
+* **Power Saving (Sleep Mode):** If the IAQ remains below **75** for more than 60 seconds, the OLED enters a low-power sleep state, waking only on a button interrupt or a new VOC spike.
+* **Battery Filtering:** Battery ADC readings are smoothed using a 50-sample Exponential Moving Average (EMA) filter to prevent screen flickering and provide stable UI percentage updates.
+
+## Deployment Instructions
+1. Install the **esp32** board support package by Espressif Systems within the Arduino IDE Board Manager.
+2. Select **ESP32C3 Dev Module** as the target environment.
+3. Interface the ESP32-C3 SuperMini to the host machine via USB-C.
+4. Verify the I2C pin mappings (SDA: 6, SCL: 7) align with the active hardware revision.
+5. Compile and flash `AeroGuard_Main.ino` to the MCU.
