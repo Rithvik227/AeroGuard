@@ -1,1 +1,106 @@
+// AeroGuard V1 Firmware
+// Rithvik Godishala / Team AeroGuard - 04/18/2026
+// Wearable that reads air quality from a BME680 (through Bosch BSEC) and buzzes when VOC levels get unsafe
+
+#include <Arduino.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <bsec2.h>
+
+#define I2C_SDA    6
+#define I2C_SCL    7
+#define MOTOR_PIN  5
+
+#define SCREEN_W   128
+#define SCREEN_H   64
+#define OLED_ADDR  0x3C
+
+#define IAQ_ALERT  150.0   // 150+ is "moderately polluted" on Bosch's IAQ scale, so we warn from here up
+
+Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);  // -1 = no reset pin, OLED resets with the board
+Bsec2 bme;
+
+// Latest readings, filled in by the BSEC callback
+float temp = 0, hum = 0, iaq = 0;
+uint8_t iaqAcc = 0;
+bool newData = false;
+
+// BSEC calls this whenever it finishes a new set of results
+void onBsecData(const bme68xData data, const bsecOutputs outputs, Bsec2 bsec) {
+  for (uint8_t i = 0; i < outputs.nOutputs; i++) {
+    const bsecData &out = outputs.output[i];
+
+    switch (out.sensor_id) {
+      case BSEC_OUTPUT_IAQ:
+        iaq = out.signal;
+        iaqAcc = out.accuracy;  // 0-3, IAQ isn't trustworthy until this climbs
+        break;
+      case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE:
+        temp = out.signal;
+        break;
+      case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY:
+        hum = out.signal;
+        break;
+    }
+  }
+  newData = true;
+}
+
+// Freeze with a message if a part is missing, so we know exactly what broke (idea from Gemini 3.1 Pro)
+void halt(const char *msg) {
+  Serial.println(msg);
+  while (true) delay(1000);  // delay keeps the ESP32 watchdog from resetting us
+}
+
+void drawScreen() {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.printf("Temp: %.1f C", temp);
+  display.setCursor(0, 16);
+  display.printf("Hum:  %.1f %%", hum);
+  display.setCursor(0, 32);
+  display.printf("IAQ:  %.0f", iaq);
+  display.setCursor(0, 48);
+  display.printf("Acc:  %d/3", iaqAcc);
+  display.display();
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial && millis() < 3000);  // wait for USB, but don't hang forever when running on battery
+  Serial.println("AeroGuard V1 booting...");
+
+  // Motor off first so it doesn't buzz during startup
+  pinMode(MOTOR_PIN, OUTPUT);
+  digitalWrite(MOTOR_PIN, LOW);
+
+  Wire.begin(I2C_SDA, I2C_SCL);  // OLED and BME680 share this bus
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) halt("OLED not found");
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  if (!bme.begin(BME68X_I2C_ADDR_HIGH, Wire)) halt("BME680 not found");
+
+  // Only ask BSEC for the three values we actually use
+  bsecSensor outputsWanted[] = {
+    BSEC_OUTPUT_IAQ,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY
+  };
+  bme.updateSubscription(outputsWanted, 3, BSEC_SAMPLE_RATE_LP);  // low power mode = a reading every 3s, good for battery
+  bme.attachCallback(onBsecData);
+}
+
+void loop() {
+  if (!bme.run()) return;   // sensor error, just try again next loop
+  if (!newData) return;     // no fresh reading yet, nothing to update
+  newData = false;
+
+  // Buzz while air is bad, stop once it clears
+  digitalWrite(MOTOR_PIN, iaq >= IAQ_ALERT ? HIGH : LOW);
+
+  drawScreen();
+}
 
