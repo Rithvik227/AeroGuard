@@ -1,9 +1,13 @@
 Project AeroGuard: Firmware & System Logic
 
 SkillsUSA Engineering Technology-Design (2024-2026)
-Institution: William Mason High School
+
+William Mason High School
+
 Lead Electronics & Firmware: Rithvik Godishala
+
 Mechanical Design: Abinav Valluri
+
 Project Management: Sushil Kumaresan
 
 System Overview:
