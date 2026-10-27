@@ -20,14 +20,14 @@ This hardware and software integration directly addresses UN Sustainable Develop
  Alert Mechanism: 3V Haptic Vibration Motor (Driven via NPN Transistor)
  Power Management: 3.7V LiPo Battery integrated with a TP4056 Charging Module
 
- Pin Configuration
-| Component | ESP32-C3 Pin | Interface / Function |
-| :--- | :--- | :--- |
-| BME680 SDA | GPIO 6 | I2C Data |
-| BME680 SCL | GPIO 7 | I2C Clock |
-| OLED SDA | GPIO 5 | I2C Data |
-| OLED SCL | GPIO 4 | I2C Clock |
-| Haptic Motor | GPIO 3 | Digital Out (Alert Trigger) |
+Pin Configuration:
+Component: ESP32-C3 Pin, Interface, Function
+
+BME680 SDA: GPIO 6, I2C Data
+BME680 SCL: GPIO 7, I2C Clock
+OLED SDA: GPIO 5, I2C Data
+OLED SCL: GPIO 4, I2C Clock
+Haptic Motor: GPIO 3, Digital Out (Alert Trigger)
 
  Software Dependencies
 To compile this firmware in the Arduino IDE or PlatformIO, the following dependencies must be installed:
