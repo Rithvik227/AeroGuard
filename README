@@ -7,9 +7,7 @@ Lead Electronics & Firmware: Rithvik Godishala
 Mechanical Design: Abinav Valluri  
 Project Management: Sushil Kumaresan  
 
----
-
- System Overview
+System Overview
 This repository contains the C++ firmware for Project AeroGuard, a low-cost (<$50) wearable air quality monitoring system engineered for high-risk industrial environments. The system utilizes an ESP32-C3 microcontroller to actively sample Volatile Organic Compounds (VOCs) and triggers a haptic feedback mechanism to alert users in high-noise environments where traditional audible alarms are ineffective.
 
 This hardware and software integration directly addresses UN Sustainable Development Goals 3 (Good Health and Well-being) and 11 (Sustainable Cities and Communities).
