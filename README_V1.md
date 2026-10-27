@@ -23,11 +23,11 @@ This hardware and software integration directly addresses UN Sustainable Develop
  Pin Configuration
 | Component | ESP32-C3 Pin | Interface / Function |
 | :--- | :--- | :--- |
-| BME680 SDA | GPIO [X] | I2C Data |
-| BME680 SCL | GPIO [X] | I2C Clock |
-| OLED SDA | GPIO [X] | I2C Data |
-| OLED SCL | GPIO [X] | I2C Clock |
-| Haptic Motor | GPIO [X] | Digital Out (Alert Trigger) |
+| BME680 SDA | GPIO 6 | I2C Data |
+| BME680 SCL | GPIO 7 | I2C Clock |
+| OLED SDA | GPIO 5 | I2C Data |
+| OLED SCL | GPIO 4 | I2C Clock |
+| Haptic Motor | GPIO 3 | Digital Out (Alert Trigger) |
 
  Software Dependencies
 To compile this firmware in the Arduino IDE or PlatformIO, the following dependencies must be installed:
