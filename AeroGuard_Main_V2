@@ -1,0 +1,292 @@
+
+// Project: AeroGuard Main Firmware
+// Author: Rithvik Godishala (Lead Electronics)
+// Team: Great Oaks Mason High School
+// Description: Reads BME680 VOC data via Bosch's BSEC algorithm and 
+// triggers a haptic motor if the air quality index (IAQ) gets too high.
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <bsec2.h>
+#include <EEPROM.h>
+
+// ESP32-C3 SuperMini Pin Setup
+const int I2C_SDA = 6;
+const int I2C_SCL = 7;
+const int MOTOR_PIN = 5;
+const int BATTERY_PIN = 3;
+const int BUTTON_PIN = 4;
+
+// OLED Setup (128x64)
+const int SCREEN_WIDTH = 128;
+const int SCREEN_HEIGHT = 64;
+const int OLED_RESET = -1; 
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// The Bosch sensor object
+Bsec2 envSensor;
+
+// Variables to hold the current sensor readings
+float currentTemp = 0.0, currentHum = 0.0, currentIAQ = 0.0;
+float currentSmoothedADC = -1;  
+uint8_t currentAccuracy = 0; 
+
+// Variables for managing screen states and timers
+bool isMuted = false;           
+bool isScreenSleeping = false;
+unsigned long lastButtonPress = 0;
+unsigned long lastBatteryCheck = 0;
+unsigned long lastUnsafeTime = 0; 
+const unsigned long SLEEP_TIMEOUT = 60000; // Put screen to sleep after 1 min of safe air
+int currentBatteryPct = 0;      
+
+// Function to calculate battery percentage. 
+// I had to add a smoothing filter (EMA) here because the raw ADC values 
+// from the ESP32 were jumping around way too much and making the screen flicker.
+int getBatteryPercentage() {
+  long totalADC = 0;
+  // Take 50 quick samples to average out the noise
+  for(int i = 0; i < 50; i++) {
+    totalADC += analogRead(BATTERY_PIN);
+    delay(1); 
+  }
+  float currentReading = totalADC / 50.0;
+  
+  // Apply Exponential Moving Average (EMA) to smooth it out further
+  if (currentSmoothedADC == -1) {
+    currentSmoothedADC = currentReading;
+  } else {
+    currentSmoothedADC = (currentSmoothedADC * 0.90) + (currentReading * 0.10);
+  }
+  
+  // Map our calibrated min/max ADC values to 0-100%
+  int percentage = map((int)currentSmoothedADC, 260, 700, 0, 100);
+  return constrain(percentage, 0, 100); 
+}
+
+// Quick helper function so I don't have to manually guess x-coordinates for centering text
+void printCenteredText(String text, int y, int textSize) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.setTextSize(textSize);
+  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  int cursorX = (SCREEN_WIDTH - w) / 2;
+  display.setCursor(cursorX, y);
+  display.print(text);
+}
+
+// Cool expanding box animation for when the watch first boots up
+void drawSplashScreen() {
+  display.clearDisplay();
+  
+  for(int i = 0; i < 12; i += 3) {
+    display.drawRoundRect(i, i, SCREEN_WIDTH - (i*2), SCREEN_HEIGHT - (i*2), 5, SSD1306_WHITE);
+    display.display();
+    delay(40);
+  }
+  
+  display.fillRoundRect(12, 12, SCREEN_WIDTH - 24, SCREEN_HEIGHT - 24, 2, SSD1306_BLACK);
+  display.setTextColor(SSD1306_WHITE);
+  printCenteredText("AeroGuard", 26, 2);
+  
+  display.display();
+  delay(2000); 
+}
+
+// This handles everything drawn on the OLED based on what state the watch is in
+void updateDisplay() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.invertDisplay(false); // Make sure it's not inverted from a previous hazard flash
+
+  // STATE 1: Mute button was pressed
+  if (isMuted) {
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(1); // Dim the screen
+    
+    printCenteredText("SYSTEM MUTED", 40, 1);
+    
+    // Draw a little crossed-out circle icon
+    int centerX = SCREEN_WIDTH / 2;
+    int centerY = 20;
+    display.drawCircle(centerX, centerY, 10, SSD1306_WHITE);
+    display.drawLine(centerX - 7, centerY - 7, centerX + 7, centerY + 7, SSD1306_WHITE);
+    
+    display.display();
+    return;
+  }
+
+  // STATE 2: Power saving mode (air is safe, screen sleeps)
+  if (isScreenSleeping) {
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(1); 
+    
+    display.setTextSize(1);
+    display.setCursor(0, 55);
+    display.print("AQI SAFE");
+    
+    display.setCursor(80, 55);
+    display.print("Bat:"); display.print(currentBatteryPct); display.print("%");
+    
+    // Draw a pulsing circle to show it's still alive
+    if ((millis() / 1000) % 2 == 0) {
+      display.fillCircle(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 4, SSD1306_WHITE);
+    }
+    display.drawCircle(SCREEN_WIDTH/2, SCREEN_HEIGHT/2, 8, SSD1306_WHITE);
+    
+    display.display();
+    return;
+  }
+
+  // STATE 3: HAZARD! Air is bad. Flash the screen and max the brightness.
+  if (currentIAQ >= 200 && currentAccuracy > 0) {
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(255); 
+    
+    // Flash the colors using millis() so it doesn't freeze the rest of the code
+    if ((millis() / 250) % 2 == 0) {
+      display.invertDisplay(true);
+    }
+    
+    display.drawRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_WHITE);
+    display.drawRect(2, 2, SCREEN_WIDTH-4, SCREEN_HEIGHT-4, SSD1306_WHITE);
+    
+    printCenteredText("HAZARD!", 22, 2);
+    
+    display.setTextSize(1);
+    display.setCursor(22, 45);
+    display.print("IAQ Level: "); display.print((int)currentIAQ);
+    
+    display.display();
+    return;
+  }
+
+  // STATE 4: Normal active monitoring
+  display.ssd1306_command(SSD1306_SETCONTRAST);
+  display.ssd1306_command(255); 
+
+  // Top Bar
+  display.setTextSize(1);
+  display.setCursor(0,0);
+  display.print("Guard Active");
+  display.setCursor(82, 0); 
+  display.print(currentBatteryPct); display.print("%");
+  
+  // Draw the battery icon outline and fill it
+  display.drawRect(107, 0, 16, 8, SSD1306_WHITE); 
+  display.fillRect(108, 1, map(currentBatteryPct, 0, 100, 0, 14), 6, SSD1306_WHITE); 
+  display.drawLine(0, 11, SCREEN_WIDTH, 11, SSD1306_WHITE);
+
+  // Environmental Data
+  display.setCursor(0, 18);
+  display.print("Temp: "); display.print(currentTemp, 1); display.print("C");
+  display.setCursor(0, 30);
+  display.print("Hum:  "); display.print(currentHum, 1); display.print("%");
+  
+  // Leaving this here for debugging if we need to check the battery circuit later
+  display.setCursor(76, 18);
+  display.print("ADC: "); display.print((int)currentSmoothedADC);
+
+  // Bottom Status Bar
+  display.drawLine(0, 44, SCREEN_WIDTH, 44, SSD1306_WHITE);
+  if (currentAccuracy == 0) {
+    display.setCursor(0, 50);
+    // Blink the calibration text
+    if ((millis() / 500) % 2 == 0) {
+      display.print("Sensor Calibrating...");
+    }
+  } else {
+    display.setCursor(0, 50);
+    display.print("IAQ Level: "); display.print((int)currentIAQ);
+  }
+
+  // Low battery warning pops up in the corner if it drops below 15%
+  if (currentBatteryPct <= 15) {
+    display.fillRect(70, 45, 58, 19, SSD1306_BLACK); // clear a spot for the text
+    if ((millis() / 500) % 2 == 0) {
+      display.setCursor(75, 50);
+      display.print("LOW BAT");
+    }
+  }
+
+  display.display();
+}
+
+// The BSEC library calls this function automatically whenever it finishes processing new air data
+void newDataCallback(const bme68xData data, const bsecOutputs outputs, Bsec2 bsec) {
+  if (!outputs.nOutputs) return;
+  for (uint8_t i = 0; i < outputs.nOutputs; i++) {
+    const bsecData output = outputs.output[i];
+    switch (output.sensor_id) {
+      case BSEC_OUTPUT_IAQ:
+        currentIAQ = output.signal;
+        currentAccuracy = output.accuracy; // 0 = calibrating, 3 = fully accurate
+        break;
+      case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE:
+        currentTemp = output.signal;
+        break;
+      case BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY:
+        currentHum = output.signal;
+        break;
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000); 
+  
+  pinMode(MOTOR_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  
+  Wire.begin(I2C_SDA, I2C_SCL);
+  delay(100); 
+
+  // Boot the OLED
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED Fail");
+    for(;;); // Stuck here if screen is unplugged
+  }
+  
+  drawSplashScreen();
+
+  // Boot the BME680 Sensor
+  if (!envSensor.begin(BME68X_I2C_ADDR_HIGH, Wire)) {
+    Serial.println("BSEC2 Begin Failed.");
+    display.clearDisplay();
+    printCenteredText("SENSOR ERR", 25, 2);
+    display.display();
+    while(1); 
+  }
+
+  // Tell the BSEC algorithm what data we actually want to calculate
+  bsecSensor sensorList[] = {
+    BSEC_OUTPUT_IAQ,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE,
+    BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY
+  };
+  
+  envSensor.updateSubscription(sensorList, 3, BSEC_SAMPLE_RATE_LP);
+  envSensor.attachCallback(newDataCallback);
+  
+  // Get initial battery reading before we start the main loop
+  currentBatteryPct = getBatteryPercentage();
+  lastUnsafeTime = millis(); 
+  
+  Serial.println("AeroGuard Online");
+}
+
+void loop() {
+  // Mute Button Logic (using millis for debouncing so we don't get double presses)
+  if (digitalRead(BUTTON_PIN) == LOW && millis() - lastButtonPress > 400) {
+    isMuted = !isMuted;
+    lastButtonPress = millis();
+    
+    if (isMuted) {
+      digitalWrite(MOTOR_PIN, LOW); // Kill motor instantly if user mutes it
+    }
+    
+    isScreenSleeping = false; // Wake up screen if they press the button
+    lastUnsafeTime = millis(); 
+    updateDisplay();
